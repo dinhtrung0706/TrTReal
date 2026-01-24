@@ -1,0 +1,18 @@
+deepfake-presentation-aware/
+├── data/
+│   ├── base/
+│   │   ├── bonafide/
+│   │   └── spoof/
+│   └── presented_amr/
+│       ├── bonafide/
+│       └── spoof/
+├── data_generation/
+│   └── codec_amr.py
+├── features/
+│   └── extract_logmel.py
+├── training/
+│   └── train_logreg.py
+├── evaluation/
+│   └── eval_metrics.py
+├── requirements.txt
+└── README.md
