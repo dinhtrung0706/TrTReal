@@ -2,7 +2,6 @@
 Tree Parser Module - Parses tree text into a structured format
 """
 
-import re
 from dataclasses import dataclass, field
 from typing import List, Optional, Tuple
 from const import TREE_BRANCH, TREE_LAST, TREE_VERTICAL, TREE_SPACE

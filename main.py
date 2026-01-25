@@ -81,10 +81,10 @@ def cli_mode(tree_file: str, target_dir: str, dry_run: bool = False):
         print("\n⚠ Dry run mode - no files created")
         return
     
-    print(f"\n🔨 Creating structure...")
+    print("\n🔨 Creating structure...")
     results = create_file_structure(paths)
     
-    print(f"\n📊 Results:")
+    print("\n📊 Results:")
     print(f"  ✓ Created: {len(results['created'])} items")
     print(f"  ⏭ Skipped: {len(results['skipped'])} items")
     if results['errors']:

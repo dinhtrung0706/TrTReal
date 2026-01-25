@@ -3,8 +3,7 @@ Utility functions for TrTReal
 """
 
 import os
-import shutil
-from typing import List, Tuple, Optional
+from typing import List, Tuple
 from pathlib import Path
 
 

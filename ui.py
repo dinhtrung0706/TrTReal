@@ -7,15 +7,12 @@ import curses
 import os
 import subprocess
 import tempfile
-import textwrap
-from typing import List, Optional, Callable
-from const import Colors, SYMBOLS, APP_TITLE, APP_SUBTITLE, HELP_TEXT
+from const import Colors, APP_TITLE, APP_SUBTITLE
 from parser import TreeParser
 from utils import (
     create_file_structure, 
     validate_target_directory, 
-    expand_path,
-    get_directory_tree
+    expand_path
 )
 
 
@@ -125,7 +122,7 @@ class TrTRealUI:
     def _draw_menu(self):
         """Draw the menu panel"""
         start_y = 4
-        menu_width = 35
+        menu_width = 55
         
         # Menu box
         self._draw_box(start_y, 1, 11, menu_width, "Menu", Colors.TITLE)
@@ -146,8 +143,8 @@ class TrTRealUI:
     def _draw_status_panel(self):
         """Draw the status panel showing current state"""
         start_y = 4
-        start_x = 38
-        panel_width = min(40, self.width - start_x - 2)
+        start_x = 58
+        panel_width = min(50, self.width - start_x - 2)
         
         if panel_width < 20:
             return
