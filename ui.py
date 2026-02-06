@@ -28,6 +28,12 @@ def get_clipboard_content() -> str:
 class TrTRealUI:
     """Main TUI Application Class"""
     
+    # Minimum terminal dimensions for usability
+    MIN_WIDTH = 40
+    MIN_HEIGHT = 15
+    # Threshold for side-by-side layout (menu + status panels)
+    WIDE_LAYOUT_MIN_WIDTH = 90
+    
     def __init__(self, stdscr):
         self.stdscr = stdscr
         self.height, self.width = stdscr.getmaxyx()
@@ -56,6 +62,14 @@ class TrTRealUI:
         ]
         
         self.running = True
+    
+    def _is_wide_layout(self) -> bool:
+        """Check if we have enough width for side-by-side panels"""
+        return self.width >= self.WIDE_LAYOUT_MIN_WIDTH
+    
+    def _is_terminal_too_small(self) -> bool:
+        """Check if terminal is too small to render properly"""
+        return self.width < self.MIN_WIDTH or self.height < self.MIN_HEIGHT
     
     def _init_colors(self):
         """Initialize color pairs"""
@@ -89,16 +103,40 @@ class TrTRealUI:
         self.stdscr.clear()
         
         try:
-            self._draw_header()
-            self._draw_menu()
-            self._draw_status_panel()
-            self._draw_preview_panel()
-            self._draw_message()
-            self._draw_footer()
+            # Handle terminal too small
+            if self._is_terminal_too_small():
+                self._draw_resize_message()
+            else:
+                self._draw_header()
+                self._draw_menu()
+                self._draw_status_panel()
+                self._draw_preview_panel()
+                self._draw_message()
+                self._draw_footer()
         except curses.error:
             pass
         
         self.stdscr.refresh()
+    
+    def _draw_resize_message(self):
+        """Show message when terminal is too small"""
+        msg = "Terminal too small!"
+        hint = f"Min: {self.MIN_WIDTH}x{self.MIN_HEIGHT}"
+        current = f"Now: {self.width}x{self.height}"
+        
+        y = self.height // 2
+        try:
+            if self.width > len(msg):
+                x = (self.width - len(msg)) // 2
+                self.stdscr.addstr(y - 1, x, msg, curses.color_pair(Colors.ERROR) | curses.A_BOLD)
+            if self.width > len(hint):
+                x = (self.width - len(hint)) // 2
+                self.stdscr.addstr(y, x, hint, curses.color_pair(Colors.INFO))
+            if self.width > len(current):
+                x = (self.width - len(current)) // 2
+                self.stdscr.addstr(y + 1, x, current, curses.color_pair(Colors.MENU))
+        except curses.error:
+            pass
     
     def _draw_header(self):
         """Draw the application header"""
@@ -122,71 +160,127 @@ class TrTRealUI:
     def _draw_menu(self):
         """Draw the menu panel"""
         start_y = 4
-        menu_width = 55
+        
+        # Calculate menu width based on layout
+        if self._is_wide_layout():
+            # Side-by-side layout: menu takes ~55% of width
+            menu_width = min(55, int(self.width * 0.55) - 2)
+        else:
+            # Stacked layout: menu takes full width minus margins
+            menu_width = self.width - 4
+        
+        menu_width = max(30, menu_width)  # Ensure minimum width
+        menu_height = len(self.menu_items) + 2
         
         # Menu box
-        self._draw_box(start_y, 1, 11, menu_width, "Menu", Colors.TITLE)
+        self._draw_box(start_y, 1, menu_height, menu_width, "Menu", Colors.TITLE)
         
         for i, (key, label, _) in enumerate(self.menu_items):
             y = start_y + 1 + i
             x = 3
             
+            # Truncate label if needed
+            max_label_len = menu_width - 10
+            display_label = label[:max_label_len] if len(label) > max_label_len else label
+            
             if i == self.current_menu_item:
                 # Highlighted item
-                text = f" [{key}] {label} "
+                text = f" [{key}] {display_label} "
                 self.stdscr.addstr(y, x, text.ljust(menu_width - 4), 
                                    curses.color_pair(Colors.SELECTED) | curses.A_BOLD)
             else:
-                text = f" [{key}] {label}"
+                text = f" [{key}] {display_label}"
                 self.stdscr.addstr(y, x, text, curses.color_pair(Colors.MENU))
+    
+    def _get_menu_height(self) -> int:
+        """Get the height of the menu panel"""
+        return len(self.menu_items) + 2
     
     def _draw_status_panel(self):
         """Draw the status panel showing current state"""
-        start_y = 4
-        start_x = 58
-        panel_width = min(50, self.width - start_x - 2)
+        menu_height = self._get_menu_height()
+        status_height = 6  # Fixed content height (target, input status, parsed status)
         
-        if panel_width < 20:
+        if self._is_wide_layout():
+            # Side-by-side layout: status panel to the right of menu
+            start_y = 4
+            menu_width = min(55, int(self.width * 0.55) - 2)
+            menu_width = max(30, menu_width)
+            start_x = menu_width + 3
+            panel_width = self.width - start_x - 2
+        else:
+            # Stacked layout: status panel below menu
+            start_y = 4 + menu_height + 1
+            start_x = 1
+            panel_width = self.width - 4
+        
+        # Don't draw if panel would be too small
+        if panel_width < 25:
             return
         
-        self._draw_box(start_y, start_x, 11, panel_width, "Status", Colors.TITLE)
+        # Don't draw if we'd go off screen
+        if start_y + status_height > self.height - 5:
+            return
+        
+        self._draw_box(start_y, start_x, status_height, panel_width, "Status", Colors.TITLE)
         
         y = start_y + 1
         
         # Target directory
         target_label = "📁 Target:"
-        self.stdscr.addstr(y, start_x + 2, target_label, curses.color_pair(Colors.INFO))
-        target_path = self.target_directory[:panel_width - 14] if len(self.target_directory) > panel_width - 14 else self.target_directory
-        self.stdscr.addstr(y, start_x + 13, target_path, curses.color_pair(Colors.MENU))
+        try:
+            self.stdscr.addstr(y, start_x + 2, target_label, curses.color_pair(Colors.INFO))
+            max_path_len = panel_width - 15
+            target_path = self.target_directory[:max_path_len] if len(self.target_directory) > max_path_len else self.target_directory
+            self.stdscr.addstr(y, start_x + 13, target_path, curses.color_pair(Colors.MENU))
+        except curses.error:
+            pass
         
         y += 2
         
         # Tree input status
-        if self.tree_text:
-            lines = self.tree_text.count('\n') + 1
-            self.stdscr.addstr(y, start_x + 2, f"📝 Tree Input: {lines} lines", curses.color_pair(Colors.SUCCESS))
-        else:
-            self.stdscr.addstr(y, start_x + 2, "📝 Tree Input: Empty", curses.color_pair(Colors.ERROR))
+        try:
+            if self.tree_text:
+                lines = self.tree_text.count('\n') + 1
+                text = f"📝 Tree Input: {lines} lines"
+                self.stdscr.addstr(y, start_x + 2, text[:panel_width - 4], curses.color_pair(Colors.SUCCESS))
+            else:
+                self.stdscr.addstr(y, start_x + 2, "📝 Tree Input: Empty", curses.color_pair(Colors.ERROR))
+        except curses.error:
+            pass
         
         y += 1
         
         # Parsed status
-        if self.parsed_root:
-            summary = self.parser.get_summary()
-            self.stdscr.addstr(y, start_x + 2, 
-                               f"📊 Parsed: {summary['directories']} dirs, {summary['files']} files",
-                               curses.color_pair(Colors.SUCCESS))
-        else:
-            self.stdscr.addstr(y, start_x + 2, "📊 Parsed: Not yet", curses.color_pair(Colors.INFO))
+        try:
+            if self.parsed_root:
+                summary = self.parser.get_summary()
+                text = f"📊 Parsed: {summary['directories']} dirs, {summary['files']} files"
+                self.stdscr.addstr(y, start_x + 2, text[:panel_width - 4], curses.color_pair(Colors.SUCCESS))
+            else:
+                self.stdscr.addstr(y, start_x + 2, "📊 Parsed: Not yet", curses.color_pair(Colors.INFO))
+        except curses.error:
+            pass
     
     def _draw_preview_panel(self):
         """Draw the preview panel showing parsed tree"""
-        start_y = 16
+        menu_height = self._get_menu_height()
+        status_height = 6
+        
+        if self._is_wide_layout():
+            # Side-by-side layout: preview starts below both panels
+            # Take the max of menu height and status height
+            start_y = 4 + max(menu_height, status_height) + 1
+        else:
+            # Stacked layout: preview starts below both menu and status
+            start_y = 4 + menu_height + 1 + status_height + 1
+        
         start_x = 1
         panel_width = self.width - 4
         panel_height = self.height - start_y - 4
         
-        if panel_height < 5:
+        # Don't draw if not enough space
+        if panel_height < 4 or panel_width < 20:
             return
         
         self._draw_box(start_y, start_x, panel_height, panel_width, "Preview", Colors.TITLE)
@@ -220,9 +314,11 @@ class TrTRealUI:
                 except curses.error:
                     pass
         else:
+            hint = "No tree parsed yet. Press [1] to paste from clipboard."
+            if len(hint) > panel_width - 6:
+                hint = "Press [1] to paste tree"
             try:
-                self.stdscr.addstr(start_y + 2, start_x + 4, 
-                                   "No tree parsed yet. Press [1] to paste from clipboard.",
+                self.stdscr.addstr(start_y + 1, start_x + 4, hint[:panel_width - 6],
                                    curses.color_pair(Colors.INFO))
             except curses.error:
                 pass
