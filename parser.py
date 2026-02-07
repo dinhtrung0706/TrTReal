@@ -72,10 +72,22 @@ class TreeParser:
             if not name:
                 continue
             
-            # Check if it's a directory (ends with /)
+            # Check if it's a directory. Primary signal: trailing '/'.
+            # Fallback: if the next non-empty line is deeper, this node is a parent
+            # even without a trailing slash (common in plain `tree` output).
             is_directory = name.endswith('/')
             if is_directory:
                 name = name.rstrip('/')
+            else:
+                # Look ahead to the next meaningful line to infer depth
+                next_depth = None
+                for look_ahead in lines[line_num + 1:]:
+                    if not look_ahead.strip():
+                        continue
+                    next_depth, _ = self._parse_line(look_ahead)
+                    break
+                if next_depth is not None and next_depth > depth:
+                    is_directory = True
             
             # Create the node
             node = TreeNode(
