@@ -68,7 +68,7 @@ def cli_mode(tree_file: str, target_dir: str, dry_run: bool = False):
     
     # Preview
     print("\n📋 Preview:")
-    paths = parser.get_all_paths(target_dir)
+    paths = parser.get_all_paths("")
     for path, is_dir in paths[:20]:
         icon = "📁" if is_dir else "📄"
         print(f"  {icon} {path}")
@@ -82,7 +82,7 @@ def cli_mode(tree_file: str, target_dir: str, dry_run: bool = False):
         return
     
     print("\n🔨 Creating structure...")
-    results = create_file_structure(paths)
+    results = create_file_structure(paths, target_root=target_dir)
     
     print("\n📊 Results:")
     print(f"  ✓ Created: {len(results['created'])} items")

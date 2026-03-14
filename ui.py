@@ -461,7 +461,7 @@ class TrTRealUI:
             # Clean up temp file
             try:
                 os.unlink(temp_path)
-            except:
+            except OSError:
                 pass
             
             # Restore curses
@@ -557,8 +557,8 @@ class TrTRealUI:
         
         if key == ord('y') or key == ord('Y'):
             # Get paths and create structure
-            paths = self.parser.get_all_paths(self.target_directory)
-            results = create_file_structure(paths)
+            paths = self.parser.get_all_paths("")
+            results = create_file_structure(paths, target_root=self.target_directory)
             
             created = len(results["created"])
             skipped = len(results["skipped"])

@@ -7,13 +7,18 @@ from typing import List, Tuple
 from pathlib import Path
 
 
-def create_file_structure(paths: List[Tuple[str, bool]], dry_run: bool = False) -> dict:
+def create_file_structure(
+    paths: List[Tuple[str, bool]],
+    dry_run: bool = False,
+    target_root: str = ".",
+) -> dict:
     """
     Create files and directories from the parsed paths
     
     Args:
-        paths: List of tuples (path, is_directory)
+        paths: List of tuples (relative_path, is_directory)
         dry_run: If True, don't actually create anything, just validate
+        target_root: Root directory where all paths must be created
         
     Returns:
         Dictionary with results: created, skipped, errors
@@ -24,25 +29,39 @@ def create_file_structure(paths: List[Tuple[str, bool]], dry_run: bool = False) 
         "errors": []
     }
     
+    root_path = Path(target_root).expanduser().resolve()
+    
     for path, is_directory in paths:
         try:
             path_obj = Path(path)
+
+            if path_obj.is_absolute():
+                raise ValueError("Absolute paths are not allowed")
+
+            normalized_path = (root_path / path_obj).resolve()
+
+            try:
+                normalized_path.relative_to(root_path)
+            except ValueError as exc:
+                raise ValueError("Path escapes target directory") from exc
             
-            if path_obj.exists():
-                results["skipped"].append((path, "Already exists"))
+            if normalized_path.exists():
+                results["skipped"].append((str(normalized_path), "Already exists"))
                 continue
             
             if not dry_run:
                 if is_directory:
-                    path_obj.mkdir(parents=True, exist_ok=True)
+                    normalized_path.mkdir(parents=True, exist_ok=True)
                 else:
                     # Ensure parent directory exists
-                    path_obj.parent.mkdir(parents=True, exist_ok=True)
+                    normalized_path.parent.mkdir(parents=True, exist_ok=True)
                     # Create empty file
-                    path_obj.touch()
+                    normalized_path.touch()
             
-            results["created"].append(path)
+            results["created"].append(str(normalized_path))
             
+        except ValueError as e:
+            results["errors"].append((path, str(e)))
         except PermissionError:
             results["errors"].append((path, "Permission denied"))
         except OSError as e:
@@ -139,7 +158,7 @@ def _build_tree(directory: Path, prefix: str, lines: List[str], max_depth: int, 
             lines.append(f"{prefix}{connector}{entry.name}")
 
 
-def format_size(size: int) -> str:
+def format_size(size: float) -> str:
     """Format byte size to human readable format"""
     for unit in ['B', 'KB', 'MB', 'GB']:
         if size < 1024:
