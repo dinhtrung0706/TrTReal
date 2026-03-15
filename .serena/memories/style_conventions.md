@@ -1,0 +1,1 @@
+Code style: Python with docstrings on public functions/classes, type hints on parameters/returns in many places. Uses dataclasses for TreeNode. Naming: snake_case for functions/vars, PascalCase for classes, constants in ALL_CAPS. Avoids external deps. Error handling via try/except and user-friendly messages.

@@ -1,0 +1,1 @@
+After changes: run the relevant entry command (TUI/CLI) for smoke check. No test suite declared. If adding functionality, consider adding tests and documenting usage in README.
