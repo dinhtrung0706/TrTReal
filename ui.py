@@ -5,8 +5,11 @@ Uses curses for a beautiful terminal interface
 
 import curses
 import os
+import shutil
 import subprocess
+import sys
 import tempfile
+from typing import Callable, Optional, Tuple
 from const import Colors, APP_TITLE, APP_SUBTITLE
 from parser import TreeParser
 from utils import (
@@ -16,13 +19,108 @@ from utils import (
 )
 
 
-def get_clipboard_content() -> str:
-    """Get content from system clipboard (macOS)"""
+def select_clipboard_command(
+    platform: str,
+    which: Callable[[str], Optional[str]],
+) -> Optional[list]:
+    """Select the clipboard command for the current platform."""
+    if platform.startswith("darwin"):
+        return ["pbpaste"] if which("pbpaste") else None
+    if platform.startswith("win"):
+        if which("powershell"):
+            return ["powershell", "-command", "Get-Clipboard"]
+        if which("pwsh"):
+            return ["pwsh", "-command", "Get-Clipboard"]
+        return None
+    if which("xclip"):
+        return ["xclip", "-selection", "clipboard", "-o"]
+    if which("xsel"):
+        return ["xsel", "--clipboard", "--output"]
+    return None
+
+
+def get_clipboard_unavailable_message(platform: str) -> str:
+    """Provide an error message when clipboard access is unavailable."""
+    if platform.startswith("win"):
+        return "Clipboard utility not found (requires PowerShell)."
+    if platform.startswith("darwin"):
+        return "Clipboard utility not found (pbpaste unavailable)."
+    return "Clipboard utility not found. Install xclip or xsel."
+
+
+def get_clipboard_content() -> Tuple[str, Optional[str]]:
+    """Get content from system clipboard across platforms."""
+    command = select_clipboard_command(sys.platform, shutil.which)
+    if not command:
+        return "", get_clipboard_unavailable_message(sys.platform)
+
     try:
-        result = subprocess.run(['pbpaste'], capture_output=True, text=True, timeout=2)
-        return result.stdout
-    except Exception:
-        return ""
+        result = subprocess.run(command, capture_output=True, text=True, timeout=2)
+    except Exception as exc:
+        return "", f"Clipboard error: {exc}"
+
+    if result.returncode != 0:
+        error_message = result.stderr.strip() or "Clipboard command failed"
+        return "", error_message
+
+    return result.stdout, None
+
+
+def filter_tree_content(content: str) -> str:
+    """Filter editor content, removing comment lines."""
+    lines = content.splitlines()
+    filtered_lines = [line for line in lines if not line.strip().startswith("#")]
+    return "\n".join(filtered_lines).strip()
+
+
+def calculate_status_panel_layout(
+    width: int,
+    height: int,
+    menu_height: int,
+    is_wide_layout: bool,
+) -> Optional[Tuple[int, int, int, int]]:
+    """Calculate layout for the status panel."""
+    status_height = 6
+
+    if is_wide_layout:
+        start_y = 4
+        menu_width = min(55, int(width * 0.55) - 2)
+        menu_width = max(30, menu_width)
+        start_x = menu_width + 3
+        panel_width = width - start_x - 2
+    else:
+        start_y = 4 + menu_height + 1
+        start_x = 1
+        panel_width = width - 4
+
+    if panel_width < 25:
+        return None
+    if start_y + status_height > height - 5:
+        return None
+
+    return start_y, start_x, panel_width, status_height
+
+
+def calculate_preview_panel_layout(
+    width: int,
+    height: int,
+    menu_height: int,
+    status_height: int,
+    is_wide_layout: bool,
+) -> Optional[Tuple[int, int, int]]:
+    """Calculate layout for the preview panel."""
+    if is_wide_layout:
+        start_y = 4 + max(menu_height, status_height) + 1
+    else:
+        start_y = 4 + menu_height + 1 + status_height + 1
+
+    panel_width = width - 4
+    panel_height = height - start_y - 4
+
+    if panel_height < 4 or panel_width < 20:
+        return None
+
+    return start_y, panel_width, panel_height
 
 
 class TrTRealUI:
@@ -198,35 +296,30 @@ class TrTRealUI:
     
     def _draw_status_panel(self):
         """Draw the status panel showing current state"""
-        menu_height = self._get_menu_height()
-        status_height = 6  # Fixed content height (target, input status, parsed status)
-        
-        if self._is_wide_layout():
-            # Side-by-side layout: status panel to the right of menu
-            start_y = 4
-            menu_width = min(55, int(self.width * 0.55) - 2)
-            menu_width = max(30, menu_width)
-            start_x = menu_width + 3
-            panel_width = self.width - start_x - 2
-        else:
-            # Stacked layout: status panel below menu
-            start_y = 4 + menu_height + 1
-            start_x = 1
-            panel_width = self.width - 4
-        
-        # Don't draw if panel would be too small
-        if panel_width < 25:
+        layout = calculate_status_panel_layout(
+            width=self.width,
+            height=self.height,
+            menu_height=self._get_menu_height(),
+            is_wide_layout=self._is_wide_layout(),
+        )
+        if not layout:
             return
-        
-        # Don't draw if we'd go off screen
-        if start_y + status_height > self.height - 5:
-            return
-        
-        self._draw_box(start_y, start_x, status_height, panel_width, "Status", Colors.TITLE)
-        
+
+        start_y, start_x, panel_width, panel_height = layout
+        self._draw_box(start_y, start_x, panel_height, panel_width, "Status", Colors.TITLE)
+        self._draw_status_content(start_y, start_x, panel_width)
+
+    def _draw_status_content(self, start_y: int, start_x: int, panel_width: int):
+        """Render the status panel contents."""
         y = start_y + 1
-        
-        # Target directory
+        self._draw_target_line(y, start_x, panel_width)
+        y += 2
+        self._draw_tree_input_line(y, start_x, panel_width)
+        y += 1
+        self._draw_parsed_status_line(y, start_x, panel_width)
+
+    def _draw_target_line(self, y: int, start_x: int, panel_width: int):
+        """Draw the target directory line."""
         target_label = "📁 Target:"
         try:
             self.stdscr.addstr(y, start_x + 2, target_label, curses.color_pair(Colors.INFO))
@@ -235,10 +328,9 @@ class TrTRealUI:
             self.stdscr.addstr(y, start_x + 13, target_path, curses.color_pair(Colors.MENU))
         except curses.error:
             pass
-        
-        y += 2
-        
-        # Tree input status
+
+    def _draw_tree_input_line(self, y: int, start_x: int, panel_width: int):
+        """Draw the tree input status line."""
         try:
             if self.tree_text:
                 lines = self.tree_text.count('\n') + 1
@@ -248,10 +340,9 @@ class TrTRealUI:
                 self.stdscr.addstr(y, start_x + 2, "📝 Tree Input: Empty", curses.color_pair(Colors.ERROR))
         except curses.error:
             pass
-        
-        y += 1
-        
-        # Parsed status
+
+    def _draw_parsed_status_line(self, y: int, start_x: int, panel_width: int):
+        """Draw the parsed status line."""
         try:
             if self.parsed_root:
                 summary = self.parser.get_summary()
@@ -264,64 +355,76 @@ class TrTRealUI:
     
     def _draw_preview_panel(self):
         """Draw the preview panel showing parsed tree"""
-        menu_height = self._get_menu_height()
-        status_height = 6
-        
-        if self._is_wide_layout():
-            # Side-by-side layout: preview starts below both panels
-            # Take the max of menu height and status height
-            start_y = 4 + max(menu_height, status_height) + 1
-        else:
-            # Stacked layout: preview starts below both menu and status
-            start_y = 4 + menu_height + 1 + status_height + 1
-        
-        start_x = 1
-        panel_width = self.width - 4
-        panel_height = self.height - start_y - 4
-        
-        # Don't draw if not enough space
-        if panel_height < 4 or panel_width < 20:
+        layout = calculate_preview_panel_layout(
+            width=self.width,
+            height=self.height,
+            menu_height=self._get_menu_height(),
+            status_height=6,
+            is_wide_layout=self._is_wide_layout(),
+        )
+        if not layout:
             return
-        
+
+        start_y, panel_width, panel_height = layout
+        start_x = 1
         self._draw_box(start_y, start_x, panel_height, panel_width, "Preview", Colors.TITLE)
-        
+        self._draw_preview_content(start_y, start_x, panel_width, panel_height)
+
+    def _draw_preview_content(self, start_y: int, start_x: int, panel_width: int, panel_height: int):
+        """Render preview panel contents."""
         if self.parsed_root:
-            # Show parsed structure
-            paths = self.parser.get_all_paths("")
-            y = start_y + 1
-            max_lines = panel_height - 2
-            
-            for i, (path, is_dir) in enumerate(paths[:max_lines]):
-                if y >= start_y + panel_height - 1:
-                    break
-                
-                icon = "📁" if is_dir else "📄"
-                text = f" {icon} {path}"
-                if len(text) > panel_width - 4:
-                    text = text[:panel_width - 7] + "..."
-                
-                try:
-                    self.stdscr.addstr(y, start_x + 2, text, curses.color_pair(Colors.PREVIEW))
-                except curses.error:
-                    pass
-                y += 1
-            
-            if len(paths) > max_lines:
-                try:
-                    self.stdscr.addstr(y, start_x + 2, 
-                                       f" ... and {len(paths) - max_lines} more items",
-                                       curses.color_pair(Colors.INFO))
-                except curses.error:
-                    pass
+            self._draw_parsed_preview(start_y, start_x, panel_width, panel_height)
         else:
-            hint = "No tree parsed yet. Press [1] to paste from clipboard."
-            if len(hint) > panel_width - 6:
-                hint = "Press [1] to paste tree"
+            self._draw_preview_hint(start_y, start_x, panel_width)
+
+    def _draw_parsed_preview(self, start_y: int, start_x: int, panel_width: int, panel_height: int):
+        """Render parsed preview items."""
+        paths = self.parser.get_all_paths("")
+        y = start_y + 1
+        max_lines = panel_height - 2
+
+        for path, is_dir in paths[:max_lines]:
+            if y >= start_y + panel_height - 1:
+                break
+            self._draw_preview_line(y, start_x, panel_width, path, is_dir)
+            y += 1
+
+        if len(paths) > max_lines:
             try:
-                self.stdscr.addstr(start_y + 1, start_x + 4, hint[:panel_width - 6],
-                                   curses.color_pair(Colors.INFO))
+                self.stdscr.addstr(
+                    y,
+                    start_x + 2,
+                    f" ... and {len(paths) - max_lines} more items",
+                    curses.color_pair(Colors.INFO),
+                )
             except curses.error:
                 pass
+
+    def _draw_preview_line(self, y: int, start_x: int, panel_width: int, path: str, is_dir: bool):
+        """Draw a single preview line."""
+        icon = "📁" if is_dir else "📄"
+        text = f" {icon} {path}"
+        if len(text) > panel_width - 4:
+            text = text[:panel_width - 7] + "..."
+        try:
+            self.stdscr.addstr(y, start_x + 2, text, curses.color_pair(Colors.PREVIEW))
+        except curses.error:
+            pass
+
+    def _draw_preview_hint(self, start_y: int, start_x: int, panel_width: int):
+        """Draw hint when no tree is parsed."""
+        hint = "No tree parsed yet. Press [1] to paste from clipboard."
+        if len(hint) > panel_width - 6:
+            hint = "Press [1] to paste tree"
+        try:
+            self.stdscr.addstr(
+                start_y + 1,
+                start_x + 4,
+                hint[:panel_width - 6],
+                curses.color_pair(Colors.INFO),
+            )
+        except curses.error:
+            pass
     
     def _draw_message(self):
         """Draw status message"""
@@ -399,13 +502,17 @@ class TrTRealUI:
     
     def _paste_from_clipboard(self):
         """Paste tree structure directly from system clipboard"""
-        clipboard_content = get_clipboard_content()
-        
+        clipboard_content, error_message = get_clipboard_content()
+        if error_message:
+            self.message = f"✗ {error_message}"
+            self.message_type = "error"
+            return
+
         if not clipboard_content.strip():
             self.message = "✗ Clipboard is empty. Copy a tree structure first!"
             self.message_type = "error"
             return
-        
+
         self.tree_text = clipboard_content.strip()
         self._parse_tree()
         
@@ -420,59 +527,74 @@ class TrTRealUI:
     
     def _edit_tree_external(self):
         """Open external editor to edit tree structure"""
-        # Create temp file with current content
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False) as f:
-            f.write(self.tree_text if self.tree_text else "# Paste or type your tree structure here\n# Example:\n# project/\n# ├── src/\n# │   └── main.py\n# └── README.md\n")
-            temp_path = f.name
-        
-        # Get editor from environment
-        editor = os.environ.get('EDITOR', os.environ.get('VISUAL', 'nano'))
-        
-        # Temporarily leave curses mode
+        temp_path = self._create_temp_tree_file()
+        editor = self._get_editor_command()
+
         curses.endwin()
-        
         try:
-            # Open editor
             subprocess.run([editor, temp_path])
-            
-            # Read back the content
-            with open(temp_path, 'r') as f:
-                content = f.read()
-            
-            # Filter out comment lines and empty lines at the start
-            lines = content.split('\n')
-            filtered_lines = [line for line in lines if not line.strip().startswith('#')]
-            self.tree_text = '\n'.join(filtered_lines).strip()
-            
-            if self.tree_text:
-                self._parse_tree()
-                if self.parsed_root:
-                    summary = self.parser.get_summary()
-                    self.message = f"✓ Loaded: {summary['directories']} dirs, {summary['files']} files"
-                    self.message_type = "success"
-                else:
-                    self.message = "✗ Could not parse tree structure"
-                    self.message_type = "error"
-            
+            content = self._read_temp_tree_file(temp_path)
+            self._apply_tree_content(content)
         except Exception as e:
             self.message = f"✗ Editor error: {e}"
             self.message_type = "error"
         finally:
-            # Clean up temp file
-            try:
-                os.unlink(temp_path)
-            except OSError:
-                pass
-            
-            # Restore curses
-            self.stdscr = curses.initscr()
-            curses.start_color()
-            curses.use_default_colors()
-            self._init_colors()
-            curses.noecho()
-            curses.cbreak()
-            self.stdscr.keypad(True)
-            curses.curs_set(0)
+            self._cleanup_temp_file(temp_path)
+            self._restore_curses()
+
+    def _create_temp_tree_file(self) -> str:
+        """Create a temporary tree file for editing."""
+        template = (
+            self.tree_text
+            if self.tree_text
+            else "# Paste or type your tree structure here\n# Example:\n# project/\n# ├── src/\n# │   └── main.py\n# └── README.md\n"
+        )
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as temp_file:
+            temp_file.write(template)
+            return temp_file.name
+
+    def _get_editor_command(self) -> str:
+        """Get editor from environment variables."""
+        return os.environ.get("EDITOR", os.environ.get("VISUAL", "nano"))
+
+    def _read_temp_tree_file(self, temp_path: str) -> str:
+        """Read edited content from the temp file."""
+        with open(temp_path, "r") as temp_file:
+            return temp_file.read()
+
+    def _apply_tree_content(self, content: str):
+        """Apply edited tree content to the UI state."""
+        self.tree_text = filter_tree_content(content)
+
+        if not self.tree_text:
+            return
+
+        self._parse_tree()
+        if self.parsed_root:
+            summary = self.parser.get_summary()
+            self.message = f"✓ Loaded: {summary['directories']} dirs, {summary['files']} files"
+            self.message_type = "success"
+        else:
+            self.message = "✗ Could not parse tree structure"
+            self.message_type = "error"
+
+    def _cleanup_temp_file(self, temp_path: str):
+        """Remove the temporary file."""
+        try:
+            os.unlink(temp_path)
+        except OSError:
+            pass
+
+    def _restore_curses(self):
+        """Restore curses state after leaving the editor."""
+        self.stdscr = curses.initscr()
+        curses.start_color()
+        curses.use_default_colors()
+        self._init_colors()
+        curses.noecho()
+        curses.cbreak()
+        self.stdscr.keypad(True)
+        curses.curs_set(0)
     
     def _set_target(self):
         """Set target directory"""

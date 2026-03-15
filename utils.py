@@ -7,6 +7,22 @@ from typing import List, Tuple
 from pathlib import Path
 
 
+def safe_resolve_path(root_path: Path, path_obj: Path) -> Path:
+    """Resolve a path safely within a root directory."""
+    root_path = root_path.resolve()
+    if path_obj.is_absolute():
+        raise ValueError("Absolute paths are not allowed")
+
+    normalized_path = (root_path / path_obj).resolve()
+
+    try:
+        normalized_path.relative_to(root_path)
+    except ValueError as exc:
+        raise ValueError("Path escapes target directory") from exc
+
+    return normalized_path
+
+
 def create_file_structure(
     paths: List[Tuple[str, bool]],
     dry_run: bool = False,
@@ -34,16 +50,7 @@ def create_file_structure(
     for path, is_directory in paths:
         try:
             path_obj = Path(path)
-
-            if path_obj.is_absolute():
-                raise ValueError("Absolute paths are not allowed")
-
-            normalized_path = (root_path / path_obj).resolve()
-
-            try:
-                normalized_path.relative_to(root_path)
-            except ValueError as exc:
-                raise ValueError("Path escapes target directory") from exc
+            normalized_path = safe_resolve_path(root_path, path_obj)
             
             if normalized_path.exists():
                 results["skipped"].append((str(normalized_path), "Already exists"))
