@@ -5,132 +5,35 @@ Uses curses for a beautiful terminal interface
 
 import curses
 import os
-import shutil
 import subprocess
-import sys
 import tempfile
-from typing import Callable, Optional, Tuple
-from const import Colors, APP_TITLE, APP_SUBTITLE
+from const import Colors, APP_TITLE, APP_SUBTITLE, MIN_HEIGHT, MIN_WIDTH, WIDE_LAYOUT_MIN_WIDTH
 from parser import TreeParser
 from utils import (
     create_file_structure, 
     validate_target_directory, 
     expand_path
 )
-
-
-def select_clipboard_command(
-    platform: str,
-    which: Callable[[str], Optional[str]],
-) -> Optional[list]:
-    """Select the clipboard command for the current platform."""
-    if platform.startswith("darwin"):
-        return ["pbpaste"] if which("pbpaste") else None
-    if platform.startswith("win"):
-        if which("powershell"):
-            return ["powershell", "-command", "Get-Clipboard"]
-        if which("pwsh"):
-            return ["pwsh", "-command", "Get-Clipboard"]
-        return None
-    if which("xclip"):
-        return ["xclip", "-selection", "clipboard", "-o"]
-    if which("xsel"):
-        return ["xsel", "--clipboard", "--output"]
-    return None
-
-
-def get_clipboard_unavailable_message(platform: str) -> str:
-    """Provide an error message when clipboard access is unavailable."""
-    if platform.startswith("win"):
-        return "Clipboard utility not found (requires PowerShell)."
-    if platform.startswith("darwin"):
-        return "Clipboard utility not found (pbpaste unavailable)."
-    return "Clipboard utility not found. Install xclip or xsel."
-
-
-def get_clipboard_content() -> Tuple[str, Optional[str]]:
-    """Get content from system clipboard across platforms."""
-    command = select_clipboard_command(sys.platform, shutil.which)
-    if not command:
-        return "", get_clipboard_unavailable_message(sys.platform)
-
-    try:
-        result = subprocess.run(command, capture_output=True, text=True, timeout=2)
-    except Exception as exc:
-        return "", f"Clipboard error: {exc}"
-
-    if result.returncode != 0:
-        error_message = result.stderr.strip() or "Clipboard command failed"
-        return "", error_message
-
-    return result.stdout, None
-
-
-def filter_tree_content(content: str) -> str:
-    """Filter editor content, removing comment lines."""
-    lines = content.splitlines()
-    filtered_lines = [line for line in lines if not line.strip().startswith("#")]
-    return "\n".join(filtered_lines).strip()
-
-
-def calculate_status_panel_layout(
-    width: int,
-    height: int,
-    menu_height: int,
-    is_wide_layout: bool,
-) -> Optional[Tuple[int, int, int, int]]:
-    """Calculate layout for the status panel."""
-    status_height = 6
-
-    if is_wide_layout:
-        start_y = 4
-        menu_width = min(55, int(width * 0.55) - 2)
-        menu_width = max(30, menu_width)
-        start_x = menu_width + 3
-        panel_width = width - start_x - 2
-    else:
-        start_y = 4 + menu_height + 1
-        start_x = 1
-        panel_width = width - 4
-
-    if panel_width < 25:
-        return None
-    if start_y + status_height > height - 5:
-        return None
-
-    return start_y, start_x, panel_width, status_height
-
-
-def calculate_preview_panel_layout(
-    width: int,
-    height: int,
-    menu_height: int,
-    status_height: int,
-    is_wide_layout: bool,
-) -> Optional[Tuple[int, int, int]]:
-    """Calculate layout for the preview panel."""
-    if is_wide_layout:
-        start_y = 4 + max(menu_height, status_height) + 1
-    else:
-        start_y = 4 + menu_height + 1 + status_height + 1
-
-    panel_width = width - 4
-    panel_height = height - start_y - 4
-
-    if panel_height < 4 or panel_width < 20:
-        return None
-
-    return start_y, panel_width, panel_height
+from ui_layout import (
+    calculate_status_panel_layout,
+    calculate_preview_panel_layout,
+    draw_box
+)
+from ui_ops import (
+    get_clipboard_content,
+    validate_editor_command,
+    filter_tree_content
+)
 
 
 class TrTRealUI:
     """Main TUI Application Class"""
     
     # Minimum terminal dimensions for usability
-    MIN_WIDTH = 40
-    MIN_HEIGHT = 15
+    MIN_WIDTH = MIN_WIDTH
+    MIN_HEIGHT = MIN_HEIGHT
     # Threshold for side-by-side layout (menu + status panels)
-    WIDE_LAYOUT_MIN_WIDTH = 90
+    WIDE_LAYOUT_MIN_WIDTH = WIDE_LAYOUT_MIN_WIDTH
     
     def __init__(self, stdscr):
         self.stdscr = stdscr
@@ -271,7 +174,7 @@ class TrTRealUI:
         menu_height = len(self.menu_items) + 2
         
         # Menu box
-        self._draw_box(start_y, 1, menu_height, menu_width, "Menu", Colors.TITLE)
+        draw_box(self.stdscr, start_y, 1, menu_height, menu_width, "Menu", Colors.TITLE)
         
         for i, (key, label, _) in enumerate(self.menu_items):
             y = start_y + 1 + i
@@ -306,7 +209,7 @@ class TrTRealUI:
             return
 
         start_y, start_x, panel_width, panel_height = layout
-        self._draw_box(start_y, start_x, panel_height, panel_width, "Status", Colors.TITLE)
+        draw_box(self.stdscr, start_y, start_x, panel_height, panel_width, "Status", Colors.TITLE)
         self._draw_status_content(start_y, start_x, panel_width)
 
     def _draw_status_content(self, start_y: int, start_x: int, panel_width: int):
@@ -367,7 +270,7 @@ class TrTRealUI:
 
         start_y, panel_width, panel_height = layout
         start_x = 1
-        self._draw_box(start_y, start_x, panel_height, panel_width, "Preview", Colors.TITLE)
+        draw_box(self.stdscr, start_y, start_x, panel_height, panel_width, "Preview", Colors.TITLE)
         self._draw_preview_content(start_y, start_x, panel_width, panel_height)
 
     def _draw_preview_content(self, start_y: int, start_x: int, panel_width: int, panel_height: int):
@@ -454,25 +357,6 @@ class TrTRealUI:
         except curses.error:
             pass
     
-    def _draw_box(self, y: int, x: int, height: int, width: int, title: str, title_color: int):
-        """Draw a box with a title"""
-        try:
-            # Top border with title
-            self.stdscr.addstr(y, x, "╭" + "─" * (width - 2) + "╮", curses.color_pair(Colors.BORDER))
-            if title:
-                title_x = x + 2
-                self.stdscr.addstr(y, title_x, f" {title} ", curses.color_pair(title_color) | curses.A_BOLD)
-            
-            # Sides
-            for i in range(1, height - 1):
-                self.stdscr.addstr(y + i, x, "│", curses.color_pair(Colors.BORDER))
-                self.stdscr.addstr(y + i, x + width - 1, "│", curses.color_pair(Colors.BORDER))
-            
-            # Bottom border
-            self.stdscr.addstr(y + height - 1, x, "╰" + "─" * (width - 2) + "╯", curses.color_pair(Colors.BORDER))
-        except curses.error:
-            pass
-    
     def _handle_input(self):
         """Handle keyboard input"""
         key = self.stdscr.getch()
@@ -528,13 +412,22 @@ class TrTRealUI:
     def _edit_tree_external(self):
         """Open external editor to edit tree structure"""
         temp_path = self._create_temp_tree_file()
-        editor = self._get_editor_command()
+        editor_cmd = self._get_editor_command()
+
+        try:
+            cmd_parts = validate_editor_command(editor_cmd)
+        except ValueError as e:
+            self.message = f"✗ {e}"
+            self.message_type = "error"
+            self._cleanup_temp_file(temp_path)
+            return
 
         curses.endwin()
         try:
-            subprocess.run([editor, temp_path])
+            subprocess.run(cmd_parts + [temp_path])
             content = self._read_temp_tree_file(temp_path)
             self._apply_tree_content(content)
+
         except Exception as e:
             self.message = f"✗ Editor error: {e}"
             self.message_type = "error"

@@ -1,6 +1,11 @@
 """
 Constants for Tree to Real File Structure (TrTReal) Tool
 """
+# Minimum terminal dimensions for usability
+MIN_WIDTH = 40
+MIN_HEIGHT = 15
+# Threshold for side-by-side layout (menu + status panels)
+WIDE_LAYOUT_MIN_WIDTH = 90
 
 # Tree prefixes used in tree output
 TREE_BRANCH = "├── "      # Branch connector

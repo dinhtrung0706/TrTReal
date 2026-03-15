@@ -36,6 +36,11 @@ class TreeNode:
 
 class TreeParser:
     """Parses tree-formatted text into TreeNode structure"""
+
+    # Constants for limits
+    MAX_NODES = 1000
+    MAX_DEPTH = 50
+    MAX_SEGMENT_LENGTH = 255
     
     def __init__(self):
         self.root: Optional[TreeNode] = None
@@ -65,10 +70,22 @@ class TreeParser:
         for line_num, line in enumerate(lines):
             if not line.strip():
                 continue
-            
+
+            if len(self.all_nodes) >= self.MAX_NODES:
+                raise ValueError(f"Total nodes exceed limit of {self.MAX_NODES}")
+
             # Calculate depth and extract name
             depth, name = self._parse_line(line)
-            
+
+            if depth > self.MAX_DEPTH:
+                raise ValueError(f"Tree depth exceeds limit of {self.MAX_DEPTH}")
+
+            if "\0" in name:
+                raise ValueError("Null bytes are not allowed in path names")
+
+            if len(name) > self.MAX_SEGMENT_LENGTH:
+                raise ValueError(f"Path segment too long (max {self.MAX_SEGMENT_LENGTH})")
+
             if not name:
                 continue
             
@@ -162,6 +179,7 @@ class TreeParser:
             
             if remaining[0] == '\t':
                 depth += 1
+                pos += len(TREE_SPACE) if hasattr(self, 'TREE_SPACE') else 1 # Fallback
                 pos += 1
                 continue
             
