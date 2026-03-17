@@ -9,6 +9,7 @@ A powerful TUI (Text User Interface) tool that converts tree-formatted text into
 - **Preview Mode**: See what will be created before executing
 - **CLI Support**: Command-line mode for scripting
 - **Safe Execution**: Validates paths and handles errors gracefully
+- **Security Guards**: Editor allowlist and parser limits to prevent abuse
 - **No Dependencies**: Uses only Python standard library
 
 ## Installation
@@ -71,17 +72,41 @@ project-name/
 3. **Preview**: Review what will be created
 4. **Create**: Execute and create the files/directories
 
+## Security & Limits
+
+- **Editor allowlist**: The external editor used in the TUI is restricted to known binaries
+  (`vim`, `vi`, `nano`, `code`, `emacs`, `notepad`, `edit`) to prevent executing arbitrary commands.
+- **Clipboard tools**:
+  - macOS: `pbpaste`
+  - Windows: `powershell` or `pwsh`
+  - Linux: `xclip` or `xsel`
+- **Parser limits** (to avoid resource exhaustion):
+  - Max nodes: 1000
+  - Max depth: 50
+  - Max segment length: 255
+  - Null bytes are rejected
+
 ## Project Structure
 
 ```
 TrTReal/
 ├── main.py         # Entry point
 ├── ui.py           # TUI implementation
+├── ui_layout.py    # Layout helpers
+├── ui_ops.py       # Clipboard/editor helpers
 ├── parser.py       # Tree text parser
 ├── utils.py        # File operations utilities
 ├── const.py        # Constants and configuration
 ├── requirements.txt
 └── README.md
+```
+
+## Tests
+
+Run all tests:
+
+```bash
+python3 -m unittest discover -s tests -p "test_*.py"
 ```
 
 ## Requirements
